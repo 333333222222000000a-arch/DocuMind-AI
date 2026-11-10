@@ -367,7 +367,16 @@ GROQ_MODELS = [
 
 ```
 Universal-PDF-RAG-Chatbot/
-├── app.py                      # Main Streamlit application
+├── app.py                      # Backward-compatible Streamlit entry point
+├── rag_app/                    # Reusable RAG pipeline modules
+│   ├── config.py               # Shared settings and prompt template
+│   ├── ingestion.py            # Safe uploads, PDF extraction, chunking, fingerprints
+│   ├── embeddings.py           # Hugging Face embedding factory
+│   ├── vector_store.py         # Content-keyed FAISS storage and retrieval
+│   ├── providers.py            # Groq and OpenAI adapters
+│   ├── answering.py            # Retrieval answer chain
+│   └── citations.py            # Source and debug formatting
+├── tests/                      # Dependency-light modular tests
 ├── requirements.txt            # Python dependencies
 ├── LICENSE                     # MIT License
 ├── README.md                   # This file
@@ -375,9 +384,11 @@ Universal-PDF-RAG-Chatbot/
 ├── .gitignore                 # Git exclusions
 ├── .streamlit/
 │   └── secrets.toml           # API keys (not in git)
-├── faiss_index_storage/       # FAISS index (auto-created)
-│   ├── index.faiss
-│   └── index.pkl
+├── faiss_index_storage/       # Content-keyed FAISS indexes (auto-created)
+│   └── <corpus fingerprint>/
+│       ├── index.faiss
+│       ├── documents.json
+│       └── manifest.json
 └── app.log                    # Application logs
 ```
 
@@ -445,8 +456,8 @@ git clone https://github.com/YOUR_USERNAME/Universal-PDF-RAG-Chatbot.git
 # Install dev dependencies
 pip install -r requirements.txt
 
-# Run tests (if available)
-pytest tests/
+# Run tests
+python -m unittest discover -s tests -v
 ```
 
 ---

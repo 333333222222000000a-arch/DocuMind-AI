@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "description": "Small labeled retrieval set; synthetic excerpts keep CI deterministic and credential-free.",
+  "cases": [
+    {
+      "id": "direct_cpu_en",
+      "category": "direct_fact",
+      "language": "en",
+      "question": "Which processor is specified for the server?",
+      "chunks": [
+        {"chunk_id": "cpu", "source": "server_specs.pdf", "page": 5, "text": "Processor: Intel Core i5-14400F."},
+        {"chunk_id": "camera", "source": "server_specs.pdf", "page": 2, "text": "The system currently serves 30 cameras."},
+        {"chunk_id": "memory", "source": "server_specs.pdf", "page": 5, "text": "Memory: 32GB DDR5 5200."}
+      ],
+      "relevant_chunk_ids": ["cpu"],
+      "expected_no_answer": false
+    },
+    {
+      "id": "multi_passage_specs",
+      "category": "multi_passage",
+      "language": "en",
+      "question": "State the server CPU and memory.",
+      "chunks": [
+        {"chunk_id": "mp_cpu", "source": "server_specs.pdf", "page": 5, "text": "Processor: Intel Core i5-14400F."},
+        {"chunk_id": "mp_memory", "source": "server_specs.pdf", "page": 5, "text": "Memory: 32GB DDR5 5200."},
+        {"chunk_id": "mp_noise", "source": "server_specs.pdf", "page": 4, "text": "The floor switches supply power to cameras."}
+      ],
+      "relevant_chunk_ids": ["mp_cpu", "mp_memory"],
+      "expected_no_answer": false
+    },
+    {
+      "id": "answer_absent",
+      "category": "missing_answer",
+      "language": "en",
+      "question": "What warranty period is provided for the server?",
+      "chunks": [
+        {"chunk_id": "absent_cpu", "source": "server_specs.pdf", "page": 5, "text": "Processor: Intel Core i5-14400F."},
+        {"chunk_id": "absent_gpu", "source": "server_specs.pdf", "page": 5, "text": "Graphics: RTX 5060 Ti 16GB."}
+      ],
+      "relevant_chunk_ids": [],
+      "expected_no_answer": true
+    },
+    {
+      "id": "arabic_gpu",
+      "category": "arabic_question",
+      "language": "ar",
+      "question": "ما سعة ذاكرة بطاقة الرسومات المذكورة؟",
+      "chunks": [
+        {"chunk_id": "ar_gpu", "source": "مواصفات.pdf", "page": 5, "text": "كارت الشاشة RTX 5060 Ti بذاكرة 16GB."},
+        {"chunk_id": "ar_net", "source": "مواصفات.pdf", "page": 4, "text": "الشبكة تستخدم كابلات جيجابت."}
+      ],
+      "relevant_chunk_ids": ["ar_gpu"],
+      "expected_no_answer": false
+    },
+    {
+      "id": "english_psu",
+      "category": "english_question",
+      "language": "en",
+      "question": "What power supply model and rating are listed?",
+      "chunks": [
+        {"chunk_id": "psu", "source": "server_specs.pdf", "page": 5, "text": "Power supply: MSI MAG A750GL, 750W Gold."},
+        {"chunk_id": "psu_noise", "source": "server_specs.pdf", "page": 6, "text": "A UPS protects the server during power loss."}
+      ],
+      "relevant_chunk_ids": ["psu"],
+      "expected_no_answer": false
+    },
+    {
+      "id": "multiple_pdf_evidence",
+      "category": "multiple_pdfs",
+      "language": "en",
+      "question": "What network switch and storage are listed?",
+      "chunks": [
+        {"chunk_id": "net_switch", "source": "network.pdf", "page": 4, "text": "Switch: TP-Link TL-SG1218MPE."},
+        {"chunk_id": "storage", "source": "server_specs.pdf", "page": 5, "text": "Storage: two WD_BLACK SN850X 1TB drives in RAID1."},
+        {"chunk_id": "noise", "source": "server_specs.pdf", "page": 1, "text": "The existing system supports cameras."}
+      ],
+      "relevant_chunk_ids": ["net_switch", "storage"],
+      "expected_no_answer": false
+    },
+    {
+      "id": "conflicting_passages",
+      "category": "conflicting_evidence",
+      "language": "en",
+      "question": "How much RAM does the server require?",
+      "chunks": [
+        {"chunk_id": "ram_32", "source": "server_specs.pdf", "page": 5, "text": "The server specification lists 32GB DDR5 memory."},
+        {"chunk_id": "ram_64", "source": "amendment.pdf", "page": 2, "text": "The revised server requirement lists 64GB memory."}
+      ],
+      "relevant_chunk_ids": ["ram_32", "ram_64"],
+      "expected_no_answer": false,
+      "expected_conflict": true
+    }
+  ]
+}

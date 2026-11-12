@@ -98,6 +98,8 @@ st.markdown("""
     [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) [data-testid="stMarkdownContainer"] { background: #fff; border: 1px solid #e1e7f0; border-radius: 12px; padding: .95rem 1.05rem; box-shadow: 0 2px 8px rgba(20, 38, 68, .035); }
     .dm-brand { color: #f6f8fc; font-size: 1.2rem; font-weight: 750; letter-spacing: -.02em; padding: .4rem .1rem; }
     .dm-brand-mark { display: inline-grid; place-items: center; width: 2rem; height: 2rem; margin-right: .55rem; border-radius: 9px; color: white; background: #466fe0; font-weight: 800; }
+    .dm-brand-tagline { color: #aebbd0; font-size: .76rem; letter-spacing: .01em; margin: -.15rem 0 .7rem .15rem; }
+    .dm-header-tagline { color: #65758c; font-size: .82rem; margin: -.1rem 0 .45rem; }
     .dm-kicker { color: #657897; font-size: .78rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
     .dm-page-header { padding: .2rem 0 1.25rem; border-bottom: 1px solid #e3e8f0; margin-bottom: 1.25rem; }
     .dm-page-description { color: #687790; font-size: .97rem; margin: .2rem 0 0; }
@@ -119,7 +121,7 @@ st.markdown("""
 
 with st.sidebar:
     st.markdown('<div class="dm-brand"><span class="dm-brand-mark">D</span>DocuMind AI</div>', unsafe_allow_html=True)
-    st.caption("Document intelligence workspace")
+    st.markdown('<div class="dm-brand-tagline">AI-Powered Document Intelligence</div>', unsafe_allow_html=True)
     st.markdown("---")
     st.markdown("#### Navigation")
     selected_page = st.radio(
@@ -160,7 +162,6 @@ with st.sidebar:
             use_container_width=True,
         )
     st.markdown("---")
-    st.caption("Original project by Ratnesh Singh")
 
 page_descriptions = {
     "Overview": "A clear view of your document workspace and current session.",
@@ -172,6 +173,7 @@ page_descriptions = {
 st.markdown(f"""
 <div class="dm-page-header">
   <div class="dm-kicker">DocuMind AI</div>
+  <div class="dm-header-tagline">AI-Powered Document Intelligence</div>
   <h1>{html.escape(selected_page)}</h1>
   <div class="dm-page-description">{html.escape(page_descriptions[selected_page])}</div>
 </div>
@@ -400,7 +402,7 @@ elif selected_page == "Chat":
         if submitted and st.session_state.get("query_input", "").strip():
             latest_query = st.session_state["query_input"].strip()
             st.session_state["messages"].append(("user", latest_query))
-            log_event(f"Processing query: {latest_query[:50]}…")
+            log_event("Processing user query")
             success = False
             models_to_try = []
             all_errors = []
@@ -423,7 +425,7 @@ elif selected_page == "Chat":
                                 else get_openai_llm_instance(openai_key, model_name)
                             )
                             answer, source_docs = answer_question(retriever, current_llm, latest_query, logger=log_event)
-                            log_event(f"Retrieved {len(source_docs)} chunks for query")
+                            log_event(f"Returned {len(source_docs)} citation-mapped source chunks for query")
                             full_answer = answer + f"|||FOOTER:Generated with: {model_name}"
                             if source_docs:
                                 full_answer += format_citations(source_docs) + format_debug_chunks(source_docs)
@@ -461,8 +463,8 @@ elif selected_page == "About":
     with about2:
         st.markdown("#### Technology")
         st.write("Python · Streamlit · LangChain · HuggingFace Sentence Transformers · FAISS · Groq · OpenAI (optional)")
-        st.markdown("#### Original attribution")
-        st.write("Original upstream project by Ratnesh Singh. The MIT License and upstream attribution are preserved.")
+        st.markdown("#### Project credits")
+        st.write("DocuMind AI is developed and extended from the open-source Universal PDF RAG Chatbot by Ratnesh Singh. The original MIT license and copyright notice remain in the project LICENSE file.")
         st.caption("The current ingestion pipeline supports PDF files.")
     with st.expander("Developer notes"):
         st.write("Upload PDFs in Documents, wait for indexing, then ask a question in Chat. Expand source cards to review evidence. Use Rebuild document index to reprocess the current document set.")
@@ -506,8 +508,7 @@ elif selected_page == "Diagnostics":
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #9eacc4; padding: 20px;'>
-    <p>DocuMind AI · PDF question answering</p>
+    <p>DocuMind AI · AI-Powered Document Intelligence</p>
     <p>Python · Streamlit · LangChain · HuggingFace · FAISS · Groq / OpenAI</p>
-    <p>Original upstream project by Ratnesh Singh</p>
 </div>
 """, unsafe_allow_html=True)

@@ -204,6 +204,217 @@ class CitationTests(unittest.TestCase):
 
 
 class AnsweringTests(unittest.TestCase):
+    def test_arabic_answer_with_valid_source_citation(self):
+        from rag_app.answering import _cited_source_documents
+
+        answer, sources = _cited_source_documents("الذاكرة 64 جيجابايت [S1].", [
+            FakeDocument("64 GB RAM", {"source": "spec.pdf", "page": 2}),
+        ])
+        self.assertEqual(answer, "الذاكرة 64 جيجابايت [S1].")
+        self.assertEqual([(s.metadata["source"], s.metadata["citation_id"]) for s in sources], [("spec.pdf", "S1")])
+
+    def test_english_answer_with_valid_source_citation(self):
+        from rag_app.answering import _cited_source_documents
+
+        answer, sources = _cited_source_documents("The server has 64 GB RAM [S1].", [
+            FakeDocument("64 GB RAM", {"source": "spec.pdf", "page": 2}),
+        ])
+        self.assertEqual(answer, "The server has 64 GB RAM [S1].")
+        self.assertEqual(len(sources), 1)
+
+    def test_multiple_valid_citations_map_to_their_exact_documents_and_pages(self):
+        from rag_app.answering import _cited_source_documents
+
+        docs = [
+            FakeDocument("cpu", {"source": "cpu.pdf", "page": 0}),
+            FakeDocument("ram", {"source": "ram.pdf", "page_number": 7}),
+        ]
+        answer, sources = _cited_source_documents("CPU is specified [S1], RAM is specified [S2].", docs)
+        self.assertEqual(answer, "CPU is specified [S1], RAM is specified [S2].")
+        self.assertEqual([(s.metadata["source"], s.metadata["citation_id"]) for s in sources], [("cpu.pdf", "S1"), ("ram.pdf", "S2")])
+        self.assertEqual(sources[0].metadata["page"], 0)
+        self.assertEqual(sources[1].metadata["page_number"], 7)
+
+    def test_nonexistent_citation_ids_are_not_accepted_or_preserved(self):
+        from rag_app.answering import _cited_source_documents
+
+        answer, sources = _cited_source_documents("Unsupported [S2].", [FakeDocument("evidence")])
+        self.assertEqual(sources, [])
+        self.assertIn("could not verify", answer)
+
+    def test_mixed_valid_and_nonexistent_ids_reject_the_whole_response(self):
+        from rag_app.answering import _cited_source_documents
+
+        answer, sources = _cited_source_documents(
+            "CPU is listed [S1], but another claim cites [S9].",
+            [FakeDocument("CPU evidence", {"source": "cpu.pdf", "page": 0})],
+        )
+        self.assertEqual(sources, [])
+        self.assertIn("could not verify", answer)
+
+    def test_mismatched_citation_brackets_are_rejected(self):
+        from rag_app.answering import _cited_source_documents
+
+        for marker in ("[S1)", "(S1]", "【S1]", "[S1】"):
+            with self.subTest(marker=marker):
+                answer, sources = _cited_source_documents(
+                    f"Unsupported evidence {marker}.", [FakeDocument("evidence")]
+                )
+                self.assertEqual(sources, [])
+                self.assertIn("could not verify", answer)
+
+    def test_malformed_marker_rejects_response_even_with_another_valid_citation(self):
+        from rag_app.answering import _cited_source_documents
+
+        answer, sources = _cited_source_documents(
+            "CPU [S1] and unsupported detail [S2).",
+            [FakeDocument("CPU evidence", {"source": "cpu.pdf", "page": 0})],
+        )
+        self.assertEqual(sources, [])
+        self.assertIn("could not verify", answer)
+
+    def test_explicit_abstention_does_not_display_or_accept_source_markers(self):
+        from rag_app.answering import _cited_source_documents
+
+        answer, sources = _cited_source_documents(
+            "NO_ANSWER: Not specified [S1] [S9].", [FakeDocument("unrelated")]
+        )
+        self.assertEqual(answer, "Not specified.")
+        self.assertEqual(sources, [])
+
+    def test_abstention_diagnostics_count_markers_without_accepting_or_logging_text(self):
+        logs = []
+        (answer, sources), _ = self._run_answer_with_mocked_chain_responses(
+            ["NO_ANSWER: Not specified [S1] [S9]."],
+            logs=logs,
+        )
+        self.assertEqual(answer, "Not specified.")
+        self.assertEqual(sources, [])
+        self.assertTrue(any('"extracted_citation_ids":["S1","S9"]' in entry for entry in logs))
+        self.assertTrue(any('"valid_ids":[]' in entry for entry in logs))
+        self.assertTrue(any('"abstained":true' in entry for entry in logs))
+        self.assertFalse(any("Not specified" in entry or "first evidence" in entry for entry in logs))
+
+    def test_uncited_answer_is_rejected(self):
+        from rag_app.answering import _cited_source_documents
+
+        answer, sources = _cited_source_documents("The server has 64 GB RAM.", [FakeDocument("64 GB RAM")])
+        self.assertEqual(sources, [])
+        self.assertIn("could not verify", answer)
+
+    def test_citation_markers_with_wrapping_variants_and_punctuation_are_normalized(self):
+        from rag_app.answering import _cited_source_documents
+
+        answer, sources = _cited_source_documents("Evidence ([s1])، ثم 【S1】!", [FakeDocument("evidence")])
+        self.assertEqual(answer, "Evidence ([S1])، ثم [S1]!")
+        self.assertEqual(len(sources), 1)
+
+    def _run_answer_with_mocked_chain_responses(
+        self, responses, question="question", documents=None, logs=None,
+        max_prompt_tokens=4000,
+    ):
+        from rag_app.answering import answer_question
+
+        docs = documents or [FakeDocument("first evidence", {"source": "first.pdf", "page": 0})]
+        retriever = Mock()
+        retriever.invoke.return_value = docs
+        chains = [Mock() for _ in responses]
+        for chain, response in zip(chains, responses):
+            chain.invoke.return_value = response
+        factory = Mock(side_effect=chains)
+        prompt_module = types.ModuleType("langchain_core.prompts")
+        prompt_module.ChatPromptTemplate = types.SimpleNamespace(from_template=Mock(side_effect=lambda template: template))
+        combine_module = types.ModuleType("langchain.chains.combine_documents")
+        combine_module.create_stuff_documents_chain = factory
+        chains_module = types.ModuleType("langchain.chains")
+        chains_module.__path__ = []
+        with patch.dict("sys.modules", {
+            "langchain_core": types.ModuleType("langchain_core"),
+            "langchain_core.prompts": prompt_module,
+            "langchain": types.ModuleType("langchain"),
+            "langchain.chains": chains_module,
+            "langchain.chains.combine_documents": combine_module,
+        }):
+            result = answer_question(
+                retriever, "mock-llm", question, "{context}\n{input}",
+                logger=(logs.append if logs is not None else None),
+                max_prompt_tokens=max_prompt_tokens,
+            )
+        return result, chains
+
+    def test_groq_style_arabic_response_traverses_prompt_and_maps_page(self):
+        docs = [FakeDocument("الذاكرة 64 جيجابايت", {"source": "spec.pdf", "page": 4})]
+        (answer, sources), chains = self._run_answer_with_mocked_chain_responses(
+            ["الذاكرة 64 جيجابايت [S1]."], "اذكر الذاكرة", docs,
+        )
+        self.assertEqual(answer, "الذاكرة 64 جيجابايت [S1].")
+        self.assertEqual(sources[0].metadata["source"], "spec.pdf")
+        self.assertEqual(sources[0].metadata["page"], 4)
+        self.assertIn("[S1] Source: spec.pdf | Page: 5", chains[0].invoke.call_args.args[0]["context"][0].page_content)
+
+    def test_groq_style_english_response_traverses_prompt_validation_and_diagnostics(self):
+        logs = []
+        docs = [
+            FakeDocument("CPU: 8 cores", {"source": "spec.pdf", "page": 0}),
+            FakeDocument("RAM: 64 GB", {"source": "spec.pdf", "page": 1}),
+            FakeDocument("Storage: 2 TB", {"source": "spec.pdf", "page": 2}),
+        ]
+        (answer, sources), chains = self._run_answer_with_mocked_chain_responses(
+            ["CPU is 8 cores [S1]; RAM is 64 GB [S2]; storage is 2 TB [S3]."],
+            "List specs", docs, logs,
+        )
+        self.assertIn("[S3]", answer)
+        self.assertEqual([s.metadata["citation_id"] for s in sources], ["S1", "S2", "S3"])
+        context = chains[0].invoke.call_args.args[0]["context"]
+        self.assertEqual([d.page_content.split(" ", 1)[0] for d in context], ["[S1]", "[S2]", "[S3]"])
+        self.assertTrue(any('"all_source_ids_present":true' in entry for entry in logs))
+        self.assertTrue(any('"valid_ids":["S1","S2","S3"]' in entry for entry in logs))
+        self.assertFalse(any("CPU is 8 cores" in entry or "List specs" in entry for entry in logs))
+
+    def test_uncited_first_answer_retries_once_with_the_same_context(self):
+        logs = []
+        (answer, sources), chains = self._run_answer_with_mocked_chain_responses(
+            ["الذاكرة 64 جيجابايت.", "الذاكرة 64 جيجابايت [S1]."],
+            question="اذكر الذاكرة",
+            logs=logs,
+        )
+        self.assertEqual(answer, "الذاكرة 64 جيجابايت [S1].")
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(len(chains), 2)
+        first_context = chains[0].invoke.call_args.args[0]["context"]
+        retry_context = chains[1].invoke.call_args.args[0]["context"]
+        self.assertEqual(first_context[0].page_content, retry_context[0].page_content)
+        self.assertEqual(chains[1].invoke.call_args.args[0]["input"], "اذكر الذاكرة")
+        self.assertEqual(chains[1].invoke.call_args.args[0]["allowed_source_ids"], "S1")
+        self.assertTrue(any('"phase":"correction"' in entry for entry in logs))
+        self.assertTrue(any('"allowed_source_ids":["S1"]' in entry for entry in logs))
+        self.assertFalse(any("64 جيجابايت" in entry or "اذكر الذاكرة" in entry for entry in logs))
+
+    def test_second_invalid_response_safely_abstains_after_one_retry(self):
+        (answer, sources), chains = self._run_answer_with_mocked_chain_responses(
+            ["Unsupported without citation", "Still unsupported [S9]."]
+        )
+        self.assertIn("could not verify", answer)
+        self.assertEqual(sources, [])
+        self.assertEqual(len(chains), 2)
+
+    def test_correction_request_is_skipped_when_full_prompt_exceeds_budget(self):
+        (answer, sources), chains = self._run_answer_with_mocked_chain_responses(
+            ["Uncited draft"], max_prompt_tokens=600,
+        )
+        self.assertIn("could not verify", answer)
+        self.assertEqual(sources, [])
+        self.assertEqual(len(chains), 1)
+
+    def test_unicode_invisible_character_inside_marker_is_normalized(self):
+        from rag_app.answering import _cited_source_documents
+
+        answer, sources = _cited_source_documents("النظام يعمل [S\u200b1]،", [
+            FakeDocument("system works", {"source": "spec.pdf", "page": 2}),
+        ])
+        self.assertEqual(answer, "النظام يعمل [S1]،")
+        self.assertEqual(sources[0].metadata["citation_id"], "S1")
+
     def test_answer_question_retrieves_context_and_passes_it_to_llm_chain(self):
         from rag_app.answering import answer_question
 
@@ -332,6 +543,110 @@ class AnsweringTests(unittest.TestCase):
             estimate_prompt_token_upper_bound(selected, "اذكر أهم المواصفات الفنية"),
             3000,
         )
+
+    def test_prompt_estimator_rejects_negative_safety_margin(self):
+        with self.assertRaises(ValueError):
+            estimate_prompt_token_upper_bound([], "question", safety_margin=-1)
+
+    def _server_spec_rank_six_fixture(self):
+        question = "عاوز اعرف متطلبات السيرفر من حيث المعالج والرامات وكارت الشاشة والتخزين"
+        long_noise = "تفاصيل كاميرات وشبكة ومبنى لا تتعلق بمكونات الخادم. " * 9
+        docs = [
+            FakeDocument(long_noise, {"source": f"noise{rank}.pdf", "page": rank})
+            for rank in (0, 1)
+        ]
+        docs.append(FakeDocument(
+            long_noise + "ملحق " * 21,
+            {"source": "noise2.pdf", "page": 2},
+        ))
+        docs.extend([
+            FakeDocument("حالة الكاميرات والاتصال في أدوار المبنى.", {"source": "noise-4.pdf", "page": 4}),
+            FakeDocument("متطلبات الكهرباء والشبكة في المبنى.", {"source": "noise-5.pdf", "page": 5}),
+            FakeDocument(
+                "مواصفات السيرفر: المعالج Intel Core i5-14400F، والذاكرة 32GB DDR5 5200، "
+                "وكارت الشاشة RTX 5060 Ti 16GB، والتخزين 2 × WD_BLACK SN850X 1TB بنظام RAID1.",
+                {"source": "تقرير_متطلبات_السيرفر.pdf", "page": 4,
+                 "source_id": "server-source", "chunk_id": "server-spec-rank-six"},
+            ),
+            FakeDocument("معلومات عن مزود الطاقة والتوصيلات.", {"source": "noise-7.pdf", "page": 7}),
+            FakeDocument("إجراءات النسخ الاحتياطي للمبنى.", {"source": "noise-8.pdf", "page": 8}),
+            FakeDocument("بيانات عامة أخرى.", {"source": "noise-9.pdf", "page": 9}),
+            FakeDocument("ملاحظات إضافية.", {"source": "noise-10.pdf", "page": 10}),
+        ])
+        return question, docs
+
+    def test_server_spec_rank_six_is_selected_despite_first_three_filling_budget(self):
+        question, docs = self._server_spec_rank_six_fixture()
+        first_three_budget = estimate_prompt_token_upper_bound(docs[:3], question)
+        self.assertEqual(first_three_budget, 3995)
+        self.assertGreater(
+            estimate_prompt_token_upper_bound([*docs[:3], docs[5]], question),
+            4000,
+        )
+
+        selected = select_context_documents(docs, question, max_prompt_tokens=4000)
+        selected_spec = next(
+            (document for document in selected if document.metadata.get("chunk_id") == "server-spec-rank-six"),
+            None,
+        )
+        self.assertIsNotNone(selected_spec, "The relevant sixth-ranked server specification must reach context")
+        self.assertLessEqual(estimate_prompt_token_upper_bound(selected, question), 4000)
+        source_id = f"S{selected.index(selected_spec) + 1}"
+        self.assertIn(source_id, {f"S{i}" for i in range(1, len(selected) + 1)})
+        from rag_app.answering import _cited_source_documents
+        _, sources = _cited_source_documents(f"المواصفات موضحة [{source_id}].", selected)
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].metadata["source"], "تقرير_متطلبات_السيرفر.pdf")
+        self.assertEqual(sources[0].metadata["page"], 4)
+        self.assertEqual(sources[0].metadata["chunk_id"], "server-spec-rank-six")
+
+    def test_english_question_can_select_later_high_overlap_evidence(self):
+        docs = [
+            FakeDocument("Long information about unrelated campus facilities. " * 30, {"page": 0}),
+            FakeDocument("A separate paragraph about building network cabling. " * 20, {"page": 1}),
+            FakeDocument("CPU Intel Core i5-14400F; RAM 32GB; GPU RTX 5060 Ti 16GB; storage 2 x 1TB NVMe RAID1.", {"source": "spec.pdf", "page": 6}),
+        ]
+        selected = select_context_documents(docs, "What CPU, RAM, GPU, and storage does the server require?", max_prompt_tokens=4000)
+        self.assertIn(docs[2], selected)
+        self.assertLessEqual(
+            estimate_prompt_token_upper_bound(selected, "What CPU, RAM, GPU, and storage does the server require?"),
+            4000,
+        )
+
+    def test_context_mmr_prefers_distinct_evidence_over_a_near_duplicate(self):
+        duplicate_text = "المعالج i5 والذاكرة 32GB وكارت RTX والتخزين NVMe للسيرفر"
+        docs = [
+            FakeDocument(duplicate_text, {"source": "report.pdf", "page": 1, "chunk_id": "a"}),
+            FakeDocument(duplicate_text + " لذلك يوصى بهذا الخادم.", {"source": "report.pdf", "page": 1, "chunk_id": "a-duplicate"}),
+            FakeDocument("التخزين RAID1 يستخدم قرصين NVMe للحفاظ على استمرارية العمل.", {"source": "report.pdf", "page": 2, "chunk_id": "storage"}),
+        ]
+        selected = select_context_documents(docs, "مواصفات المعالج والذاكرة وكارت الشاشة والتخزين", max_prompt_tokens=4000)
+        selected_ids = {document.metadata["chunk_id"] for document in selected}
+        self.assertIn("a", selected_ids)
+        self.assertIn("storage", selected_ids)
+        self.assertNotIn("a-duplicate", selected_ids)
+
+    def test_retrieved_order_and_original_metadata_are_preserved(self):
+        question, docs = self._server_spec_rank_six_fixture()
+        selected = select_context_documents(docs, question, max_prompt_tokens=4000)
+        original_positions = [docs.index(document) for document in selected]
+        self.assertEqual(original_positions, sorted(original_positions))
+        spec = next(document for document in selected if document.metadata.get("chunk_id") == "server-spec-rank-six")
+        self.assertEqual(spec.metadata["source_id"], "server-source")
+        self.assertEqual(spec.metadata["page"], 4)
+        self.assertEqual(spec.metadata["chunk_id"], "server-spec-rank-six")
+
+    def test_safe_abstention_is_preserved_when_selected_context_does_not_support_answer(self):
+        (answer, sources), chains = self._run_answer_with_mocked_chain_responses(
+            ["NO_ANSWER: المستند لا يذكر ضمان الجهاز."],
+            question="ما مدة الضمان؟",
+            documents=[
+                FakeDocument("مواصفات المعالج والذاكرة فقط.", {"source": "spec.pdf", "page": 1}),
+            ],
+        )
+        self.assertIn("المستند لا يذكر ضمان الجهاز", answer)
+        self.assertEqual(sources, [])
+        self.assertEqual(len(chains), 1)
 
     def test_prompt_preserves_document_context_and_question_fields(self):
         self.assertIn("{context}", PROMPT_TEMPLATE)
